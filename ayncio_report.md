@@ -470,7 +470,7 @@ async def start_all_udp_pings(all_line_list):
                 t.cancel()
 ```
 
-最最最后，之前应用Base Protocol没法强行打断如果出现ping不通线路就会无线循环的问题也被导师解决了：
+最后，之前应用Base Protocol没法强行打断如果出现ping不通线路就会无线循环的问题也被导师解决了：
 
 ```python
 async def start_all_udp_pings(list_all,loop):
@@ -503,7 +503,7 @@ def main():
 
 除了asyncio，asyncio_dgram之外，Python还有一些与协程相关的库，大家感兴趣可以去深入了解一下：async_timeout, asyncore, Twisted, Tornado, Gevent 。
 
-最后，并发中的异步I/O确实是个比较复杂的部分，debug也相对较难，因为搞不清后台到底发生了什么，所以经常有点虚无缥缈的感觉......笔者也是初次尝试这个领域，还有许多说得不到位的地方，欢迎大家指正！以后还要继续学习和总结才行~
+最最最后，并发中的异步I/O确实是个比较复杂的部分，debug也相对较难，因为搞不清后台到底发生了什么，所以经常有点虚无缥缈的感觉......笔者也是初次尝试这个领域，还有许多说得不到位的地方，欢迎大家指正！以后还要继续学习和总结才行~
 
 
 
