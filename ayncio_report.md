@@ -87,8 +87,7 @@ def start_all_udp_pings(all_line_list):
     for n in all_line_list:
         tasks = []
         for num in range(1, ctimer+1):
-            ping = Ping(n[0], n[1]) # Ping是我们自定义的一个类，包含固定端口和发包的相关信息，                                         
-                                    # 初始化后可以通过内部函数生成线路对应的发包数据
+            ping = Ping(n[0], n[1]) # Ping是我们自定义的一个类，包含固定端口和发包的相关信息，                                         # 初始化后可以通过内部函数生成线路对应的发包数据
         with ThreadPoolExecutor(max_workers=10) as executor: # 允许最多同时运行10条线程
             try:
                 executor.map(start_udp_ping, tasks) # 将tasks中的参数传入单测函数，放入线程池
@@ -111,10 +110,11 @@ def start_all_udp_pings(all_line_list):
        # 单测函数，在最后获得回包后挂起0.5s
        time.sleep(0.5)
    ```
+   
 
-这着实有点诡异，我到现在也只能猜测是因为这几条线路比较特殊，可能是回包数据较大或者什么别的原因，kernel在处理他们的读写操作时网络开销对于网络请求数更敏感，可能同时存在几十个请求就会使其传输速率大大变慢。而减少允许同时运行的最大线程数和暂时挂起完成任务的线程，都可以一定程度上减少同时存在的网络请求数目，所以延迟时间的问题得以缓和。但这究竟是不是背后真正的原因，笔者也不是很清楚，欢迎各位读者思考讨论！
+这着实有点诡异......我到现在也只能猜测是因为这几条线路比较特殊，可能是回包数据较大或者什么别的原因，kernel在处理他们的读写操作时网络开销对于网络请求数相对更敏感，可能同时存在几十个请求就会使其传输速率大大变慢。而减少允许同时运行的最大线程数和暂时挂起完成任务的线程，都可以一定程度上减少同时存在的网络请求数目，所以延迟时间的问题得以缓和。但这究竟是不是背后真正的原因，笔者也不是很清楚，欢迎各位读者思考讨论！
 
-可是这两种解决方法都有很强的弊端：1. 减少线程数同时及也会增长运行时间，在准确率和速率两者间找到较好的平衡相对较难。2. 同理，sleep也会增长运行时间，具体应该sleep的时间也难以界定。此外，多线程并发在切换线程的时候会消耗不必要的额外的CPU资源，对于涉及到网络的这种**I/O密集型**操作，多线程的资源消耗其实是没有必要的。所以我们试图用不用额外CPU开销的更优方案完成拨测。
+虽然问题解决了，可是这两种解决方法都有很强的弊端：1. 减少线程数同时及也会增长运行时间，在准确率和速率两者间找到较好的平衡相对较难。2. 同理，sleep也会增长运行时间，具体应该sleep的时间也难以界定。此外，多线程并发在切换线程的时候会消耗不必要的额外的CPU资源，对于涉及到网络的这种**I/O密集型**操作，多线程切换的资源消耗其实是没有必要的。所以我们试图找到不用额外CPU开销的更优方案完成拨测。
 
 
 
@@ -124,9 +124,9 @@ I/O多路复用通过使用select，poll，epoll等对socket进行监控。当�
 
 <img src="https://images.cnblogs.com/cnblogs_com/xuexianqi/1753541/o_200428130755%E5%A4%9A%E8%B7%AF%E5%A4%8D%E7%94%A8IO.png" style="zoom:52%;" />
 
-继续拿上文的煎鸡蛋做比喻，I/O多路复用就好比你一下在锅里打了好几个蛋，然后每个蛋熟了之后会发出”滋滋“的声音。打完蛋我们就看电视去了，一旦听到有蛋熟了的“滋滋”声就去拿蛋吃掉，然后继续回去看电视。
+继续拿上文的煎鸡蛋做比喻，I/O多路复用就好比你一下在锅里打了好几个蛋，然后每个蛋熟了之后会发出”滋滋“的声音。打完蛋我们就看电视去了，一旦听到有蛋熟了的“滋滋”声就去拿蛋，然后继续回去看电视，直到所有的蛋都煎好。
 
-但是由于I/O多路复用时基于回调函数的，与我们习惯的常规思维不通，比较难理解，我们并没有采取这一方法，这里也不做过多的描述了。于是在导师的指导下，我开始尝试用**协程（coroutine）**的方式来实现并发。
+但是由于I/O多路复用是基于回调函数的，与我们习惯的编程思维不通，比较难理解，我们并没有采取这一方法，这里也不做过多的描述了。于是在导师的指导下，我开始尝试用**协程（coroutine）**的方式来实现并发。
 
 
 
@@ -150,12 +150,12 @@ I/O多路复用通过使用select，poll，epoll等对socket进行监控。当�
 
 继续煎蛋的例子。这里就相当于你打完蛋后雇了个保姆帮你看着，然后就跑去看电视了，蛋熟了之后保姆会叫你回去拿蛋。
 
-我们最终是将这个拨测程序部署到云函数上的，因为云函数只支持一些基本的Python库，我们最开始是希望用Python的原生库来实现多协程并发的。早在Python2.2的时候就有了基于生成器（generator）实现协程的方法，生成器函数最大的特点是可以接受外部传入的一个变量，并根据变量内容计算结果后返回。Python2.5中生成器引入了send和yield。yield类似于Java中的return，用于返回一个值，但是不同的是下次运行函数的时候是从yield后面的代码开始运行的，因为yield关键字标记了一个函数为生成器函数，所以用一个next方法进行迭代，碰到yield后就不继续执行了，并返回这个yield后面的值[3]。例子：
+由于我们最终是要将这个拨测程序部署到云函数上的，而云函数只支持一些基本的Python库，我们最开始是希望用Python的原生库来实现多协程并发的。在寻找合适库的时候我们浅显地了解了一下Python协程发展地历史：早在Python2.2的时候就有了基于**生成器（generator）**实现协程的方法，生成器函数最大的特点是可以接受外部传入的一个变量，并根据变量内容计算结果后返回。Python2.5中生成器引入了send和yield。yield类似于Java中的return，用于返回一个值。但是不同的是下次运行函数的时候是从yield后面的代码开始运行的，因为yield关键字标记了一个函数为生成器函数，所以用一个next方法进行迭代，碰到yield后就不继续执行了，并返回这个yield后面的值[3]。举个例子：
 
 ```python
 def generator():
-    print("hello")
-    yield "I pend myself, them return" # 这里函数会暂时将自己挂起，获得返回值后继续运行
+    print("hello world!")
+    yield "I pend myself, then return!" # 这里函数会暂时将自己挂起，获得返回值后继续运行
     print("keeping executing!")
 ```
 
@@ -163,9 +163,7 @@ def generator():
 
 由于云函数使用的是**Python3.6**版本，所以我们将使用asyncio库实现多协程并发。
 
-python中asyncio基本的使用方法就是先获得一个当前的**事件循环(event loop)**，然后将我们希望执行的函数定义为**可等待（awaitable）**的类型，加入循环。完成所有函数后关闭循环。
-
-那么什么是事件循环，什么又是可等待的类型？他们又该如何使用呢？
+python中asyncio基本的使用方法就是先获得一个当前的**事件循环(event loop)**，然后将我们希望执行的函数定义为**可等待（awaitable）**的类型，加入循环。完成所有函数后关闭循环。那么什么是事件循环，什么又是可等待的类型？他们又该如何使用呢？
 
 下图是协程，事件循环和策略之间的相互作用：
 
@@ -183,11 +181,11 @@ python中asyncio基本的使用方法就是先获得一个当前的**事件循�
 
 ```python
 import asyncio
-loop = asyncio.get_event_loop() # 获得当前的event loop
 
+loop = asyncio.get_event_loop() # 获得当前的event loop
 async def fun1(): # 定义一个耗时的协程
     print("Start fun1 coroutine.")
-    await asyncio.sleep(3) # 中断协程3s
+    await asyncio.sleep(3) # 中断协程3s，模拟耗时操作（例如网络I/O)
     print("Resume fun1 coroutine.")
 
 async def fun2(): 
@@ -211,11 +209,11 @@ loop.close() # 关闭事件循环
 # Resume fun1 coroutine.
 ```
 
-其中asyncio.sleep就是一个可等待类，我们可以发现事件循环其实就像一双大手，操纵着协程的执行、暂停、恢复。除了上述例子中用到的建立get_event_loop和运行run_until_complete事件循环的方法，还有new_event_loop、set_event_loop、run_forever等，大家可以去Python官方查看使用方法。
+其中asyncio.sleep就是一个可等待类，我们可以发现事件循环其实就像一双大手，操纵着协程的执行、暂停、恢复。除了上述例子中用到的建立 (get_event_loop)和运行 (run_until_complete) 事件循环的方法，还有new_event_loop、set_event_loop、run_forever等，大家可以去Python官方查看使用方法。
 
 ##### 可等待类
 
-而在asyncio库中，await关键字用于完成我们讨论过的线程执行权切换动作。await表示在这个地方暂时将自身挂起，等待子函数执行完成，把程序控制权让给其他协程。此时这个任务会主动让出event loop，去后台执行一些网络IO之类的操作，event loop选择自己等待队列的任务继续执行；等原来网络IO的任务结束，该任务会重新加入到event loop的等待队列，等待event loop被让出从而重新调度。这样，我们就能实现在I/O端的并发了。这里要注意，await后面跟着的函数必须是**可等待（awaitable）**的。
+而在asyncio库中，await关键字用于完成我们讨论过的线程执行权切换动作。await表示在这个地方暂时将自身挂起，等待子函数执行完成，把程序控制权让给其他协程。此时这个任务会主动让出event loop，去后台执行一些网络I/O之类的操作，event loop选择自己等待队列的任务继续执行；等原来I/O的任务结束，该任务会重新加入到event loop的等待队列，等待event loop被让出从而重新调度。这样，我们就能实现在I/O端的并发了。这里要注意，await后面跟着的函数必须是**可等待（awaitable）**的。
 
 官方定义只有三种类型是可以等待的：协程类，任务类和未来类。
 
@@ -240,28 +238,26 @@ loop.close() # 关闭事件循环
   # world
   ```
 
+  有一点需要注意的是，协程中只有await关键字后面的函数才会被挂起等待，没有await关键词标记的协程与普通函数无异。
+
 - ###### **任务（Task）**
 
-  Task就是对Coroutine类进行了一下包装，被用来设置日程以便于并发执行协程。我们通过asyncio.create_task()（python3.7之前为asyncio.ensure_future()）等函数将协程包装为一个任务，那么该协程将会自动排入日程并准备运行。用Task类来运行上述的函数的话：
+  Task就是对Coroutine类进行了一下包装，被用来设置日程以便于并发执行协程。我们通过asyncio.create_task()（python3.7之前为asyncio.ensure_future()）将协程包装为一个任务，那么该协程将会自动排入日程并准备运行。用Task类来运行上述的函数的话：
 
   ```python
   async def main():
-      task1 = asyncio.create_task(
-          say_after(1, 'hello'))
-  
-      task2 = asyncio.create_task(
-          say_after(2, 'world'))
+      task1 = asyncio.create_task(say_after(1, 'hello'))
+      task2 = asyncio.create_task(say_after(2, 'world'))
       
       await task1
       await task2
       # 等待直到两个任务都运行完毕
-  
   asyncio.run(main())
   # output
   # hello
   # world
   ```
-
+  
 - ###### **未来（future）**
 
   Future是一种特殊的底层可等待对象，它代表异步操作中最终返回的结果。当一个 Future 对象被等待，这意味着协程将保持等待状态直到该Future对象在其他地方操作完毕，通常情况下我们没有必要在应用层级的代码中创建Future对象。举个例子：
@@ -275,9 +271,9 @@ loop.close() # 关闭事件循环
   async def main():
       loop = asyncio.get_event_loop() # 获取当前事件循环
   
-      fut =  loop.run_in_executor(None, fun) # 创造一个Future类对象
-      await fut # 开始运行协程
-      print(fut.result()) # 打印出最后返回的结果
+      future =  loop.run_in_executor(None, fun) # 创造一个Future类对象
+      await future # 开始运行协程
+      print(future.result()) # 打印出最后返回的结果
       # 除此之外也可以对这个Future对象添加完成后的回调 (add_done_callback)、
       # 取消任务 (cancel)、设置最终结果 (set_result)、设置异常 (set_exception) 等
   
@@ -338,9 +334,9 @@ print(pending)
 
 #### （二）尝试
 
-了解这些信息之后，很自然的，我们可以将每条线路每一次的连接测试定义成一个协程，然后用asyncio.gather()/asyncio.wait()加入事件循环实现并发。可是接下来注意到与UDP接套字有关的函数：connect()、send()、recvfrom()，这些都不是可等待的类型，在asyncio也找不到对应的可等待类（比如TCP对应的read()和write()就是可等待的）。所以就算把UDP接套字流程定义为一个协程，加入event loop，实质上也是同步的，因为当碰到这些网络处理堵塞的时候协程并不会主动交出调度权，而是等待直到IO操作完成。
+了解这些信息之后，很自然的，我们可以将每条线路每一次的连接测试定义成一个协程，然后用asyncio.gather/asyncio.wait加入事件循环实现并发。可是接下来注意到与UDP接套字有关的函数：connect、send、recvfrom，这些都不是可等待的类型，在asyncio也找不到对应的可等待类（比如TCP对应的read和write就是可等待的）。所以就算把UDP接套字流程定义为一个协程，加入事件循环，实质上也是同步的，因为当碰到这些网络处理阻塞的时候协程并不会主动交出调度权，而是等待直到I/O操作完成。
 
-虽然没有找到对应的可以直接调用的高级可等待类函数，在python的官方说明中，我们找到了一个UDP的底层API：BaseProtocol，它可以异步地执行IO端的读写工作。而在Protocol这个大类下面分有四个小类：Protocol，BufferedProtocol，DatagramProtocol以及SubprocessProtocol。我们可以参考这些协议的内部结构，自定义一个适合我们程序使用的协议。
+虽然没有找到对应的可以直接调用的高级可等待类函数，但是在python的官方说明中，我们找到了一个UDP的底层API：BaseProtocol，它可以异步地执行I/O端的读写工作。而在Protocol这个大类下面分有四个小类：Protocol，BufferedProtocol，DatagramProtocol以及SubprocessProtocol，分别应用于streaming协议（TCP等），需要手动控制接收缓冲区的streaming协议，UDP协议以及子进程。我们还可以参考这些协议的内部结构，自定义一个适合我们程序使用的协议。
 
 ##### 基础协议（Base Protocol）
 
@@ -350,9 +346,37 @@ print(pending)
 
 传输和协议用于底层事件循环接口的使用，在最顶层，传输只关心**怎样**传送字节内容，而协议决定传送**哪些**字节内容(还要在一定程度上考虑何时传送)。传输和协议总是存在着一一对应的关系，共同定义网络I/O和进程间I/O的抽象接口。
 
-我们发现其中DatagramProtocol是专门应用于UDP连接的。参考官方的范例，我们也得到了能计算delay时间和出现错误增加丢包次数的自定义的协议。
+我们发现其中DatagramProtocol是专门应用于UDP连接的。参考官方的范例，我们也得到了能计算delay时间和出现错误增加丢包次数的自定义的协议，修改代码后得到了通过协程实现并发版本的拨测。基础协议的基本使用代码如下：
 
-运行后总体运行时间确实大大缩短了，但是许多线路的delay时间相比正常的单测要增长了许多。我们怀疑还是之前的问题，一次性放出去的线路太多（10000+），就算是异步处理也难免会有阻塞，特别是一些本来单测时间就相对较长的线路进行等待和读写的时候，那么被打断的协程就不能及时得到恢复，从而造成多余的等待时间。那么很自然我们改成分批次并发，一次只将一条线路的100次测试加入tasks，放入event loop运行，等这一批测试完再将新的100次测试加入新的tasks运行。这里我们用到asyncio.gather()这个函数，如上文所说，它会将我们加入tasks的可等待类函数按顺序加入event loop运行，直到所有任务完成后返回。
+```python
+class EchoClientProtocol: # 自定义基础协议
+    def __init__(self,message,ping,key,num):
+        # ping, key, num是与拨测相关的参数，可以忽略
+        self.message = message # 需要发送请求的数据包
+        self.transport = None # 与这个基础协议对应的传输，初始化为None
+        # 进行拨测需要的操作
+
+    def connection_made(self, transport):
+        self.transport = transport
+        self.transport.sendto(self.message) # 开始传输数据
+        # 进行拨测需要的操作
+
+    def datagram_received(self, data, addr):
+        # 进行拨测需要的操作
+        self.transport.close() # 收包，关闭传输防止复用
+
+    def error_received(self, exc):
+        print('Error received:', exc) # 异常报错（非常少见）
+        
+async def start_udp_ping(ping,loop,key,num):
+    data = ping.get_data() # 获取传输包数据
+
+    transport, protocol = await loop.create_datagram_endpoint(lambda: EchoClientProtocol(data,ping,key,num),remote_addr=(ping.inpoint,int(ping.inport)))
+    # 建立端口连接传入参数，返回得到对应的传输与协议
+    return transport, protocol
+```
+
+运行后总体运行时间确实大大缩短了，但是许多线路的delay时间相比正常的单测要增长了许多。我们怀疑还是之前的问题，一次性放出去的线路太多（10000+），就算是异步处理也难免会有阻塞，特别是一些本来单测时间就相对较长的线路进行等待和读写的时候，被打断的协程就不能及时得到恢复，从而造成多余的等待时间。那么很自然我们改成分批次并发，一次只将一条线路的100次测试加入tasks，放入event loop运行，等这一批测试完再将新的100次测试加入新的tasks运行。出于gather的高级性，这里我们优先使用到asyncio.gather这个函数，如上文所说，它会将我们加入tasks的可等待类函数按顺序加入event loop运行，直到所有任务完成后返回。
 
 ```python
 # 运行所有的线路
@@ -364,10 +388,10 @@ async def start_all_udp_pings(all_line_list):
         for num in range(1, ctimer+1): # ctimer=100，一条线路测试100次
             tasks.append(asyncio.ensure_future(start_udp_ping(ping,num)))
             # 加入一次单测的协程
-        await asyncio.gather(tasks)
+        await asyncio.gather(tasks) # 等待并发完成再继续下一条线路
 ```
 
-这样更改后虽然还是会无可避免地增加一些等待时间（大概0-20ms），但也在可接受的范围内。
+这样更改后虽然还是会无可避免地增加一些等待时间（大概0-20ms），但是在可接受的波动范围内。
 
 
 
@@ -375,7 +399,7 @@ async def start_all_udp_pings(all_line_list):
 
 延迟过长的问题解决了，接下来遇到一个整个过程中最令人头大的问题：如何控制timeout。
 
-发现这个问题的契机是出现了一条ping不通的线路。在单测中，recvfrom()函数是可以设置timeout时间的，设置2s之后若还收不到回传就中断等待，在Exception中增加一次丢包。所以这条ping不通的线路正常丢包率应该是100%，每次测试时间约为2s。可是刚刚改进的程序中没有函数可以设置timeout，也就是说这个程序会一直循环地运行下去。那可以在event loop层设置循环中每个任务最长的运行时间吗？是可以的。
+发现这个问题的契机是出现了一条ping不通的线路。在单测中，recvfrom函数是可以设置timeout时间的，设置2s之后若还收不到回传就中断等待，在Exception中增加一次丢包。所以这条ping不通的线路正常丢包率应该是100%，每次测试时间约为2s。可是刚刚改进的程序中没有函数可以设置timeout，也就是说这个程序会一直循环地运行下去。那可以在event loop层设置循环中每个任务最长的运行时间吗？是可以的。
 
 按照官方说明，wait函数可以设置timeout时间，超出时限的任务会被归到pending，没有超时的归到complete，作为一对task类返回。但是pending的任务不会被取消，需要手动取消。所以我们舍弃gather，用wait取而代之来实现并发:
 
@@ -403,7 +427,7 @@ async def start_all_udp_pings(all_line_list):
 
 ```python
 async def start_udp_ping(ping,loop,key,num):
-    data = ping.get_data()
+    data = ping.get_data() # 获取发送包的数据
     return await loop.create_datagram_endpoint(lambda: UdpEchoProtocol(data,ping,key,num),remote_addr=(ping.inpoint,int(ping.inport)))
 ```
 
@@ -413,13 +437,13 @@ async def start_udp_ping(ping,loop,key,num):
 
 #### （四）解决
 
-那我们回到前一个节点：为什么会选择基础协议来完成接套字呢？因为asyncio库没有高级的UDP API，我们只能自定义一个基础协议来实现并发。那如果有一个第三方库可以像同步中使用UDP协议一样在异步中完成send，receive等动作，并能强行打断不就好了？最开始因为在云函数部署新库比较麻烦所以尽量避开了这条路，现在看来是跑不掉了......不过实际操作添加新库也没有想象中那么复杂，自己撰写好一个index.py文件，将相关库的文件包和注明版本的requirement.txt一起打包成zip上传就可以了。经过一番搜索我们锁定了这个库：**asyncio_dgram**。
+那我们回到前一个节点：为什么会选择基础协议来完成接套字呢？因为asyncio库没有高级的UDP API，我们只能自定义一个基础协议来实现并发。那如果有一个第三方库可以像同步中使用UDP协议一样在异步中完成send，receive等动作，并能强行打断不就好了？最开始因为在云函数部署新库比较麻烦所以尽量避开了这条路，现在看来是跑不掉了......不过实际操作添加新库也没有想象中那么复杂，自己撰写好一个index.py文件，将相关库的文件包和注明版本的requirement.txt一起打包成zip上传就可以了。经过一番搜索我们锁定了这个库：asyncio_dgram。
 
 这是官方提供的函数及其使用方式：
 
 <img src="https://github.com/qluag/asyncio_conclusion/blob/master/func.png?raw=True" alt="func" style="zoom:75%;" />
 
-根据官方的说明，它提供的函数及其语法和同步操作中接套字的函数几乎没有两样，这样我们不需要通过建立一个底层事件循环接口来连接调用函数和真正的UDP接套字了。因此，我们也可以通过调用asyncio.wait()函数中的timeout来控制超时的线路了。更棒的是被打断的线路的timeout error这个信号我们可以直接在UDP接套字的Exception中接收到，从而直接在每个udp连接的协程中进行超时后丢包的处理。而之前的BaseProtocol，超时的信号没有办法得到拦截。最后这些超时的线路会被打断然后归并到pending中，等一批任务运行完，我们只需要把pending的所有任务取消，然后进入下一批任务就大功告成了。
+根据官方的说明，它提供的函数及其语法和同步操作中接套字的函数几乎没有两样，这样我们不需要通过建立一个底层事件循环接口来连接调用函数和真正的UDP接套字了。因此，我们也可以通过调用asyncio.wait函数中的timeout来控制超时的线路了。更棒的是打断线路的timeout error这个信号我们可以直接在UDP接套字的Exception中接收到，从而直接在每个UDP连接的协程中进行超时后丢包的处理。而之前的BaseProtocol，超时的信号没有办法得到拦截，所以我们没有办法强行打断。最后这些超时的线路会被打断然后归并到pending中，等一批任务运行完，我们只需要把pending的所有任务取消，然后进入下一批任务就大功告成了。
 
 这样尝试之后又出现了一个问题，由于异步不可能做到和同步耗时完全一样，肯定会有一定程度的超时，再加上存在一些本来连接时间就比较长的线路，实际操作中每次运行总会有个别线路的那一批次出现多次超时，从而导致那一条线路的丢包率超过阈值(30%)而造成误报。
 
@@ -446,9 +470,40 @@ async def start_all_udp_pings(all_line_list):
                 t.cancel()
 ```
 
+最最最后，之前应用Base Protocol没法强行打断如果出现ping不通线路就会无线循环的问题也被导师解决了：
+
+```python
+async def start_all_udp_pings(list_all,loop):
+    # all_line_list是所有本地ip和虚拟ip对（inport，echoport）的集
+    # loop是之前获得的事件循环
+    for n in list_all:
+        ping = Ping(n[0], n[1]) # 自定义Ping类获取线路对应数据
+        tasks = []
+        for num in range(1, ctimer+1):
+            tasks.append(asyncio.ensure_future(start_udp_ping(ping,loop,key,num)))
+            # 将一次单测包装成Task类
+        await asyncio.gather(*tasks)
+        # tasks加入日程，等待一条线路单测100次，继续测试下一条线路
+
+async def wait_all_udp_pings():
+    # 调节事件循环的任务执行权，解决ping不通没有回应的问题
+    await asyncio.sleep(60)
+
+async def run_all_udp_pings(list_all,loop):
+    # 运行所有线路
+    await asyncio.gather(start_all_udp_pings(list_all,loop), wait_all_udp_pings())
+
+def main():
+    loop = asyncio.get_event_loop() # 获取当前事件循环
+    try:
+        loop.run_until_complete(run_all_udp_pings(list_all,loop))
+    finally:
+        loop.close()
+```
+
 除了asyncio，asyncio_dgram之外，Python还有一些与协程相关的库，大家感兴趣可以去深入了解一下：async_timeout, asyncore, Twisted, Tornado, Gevent 。
 
-最后，异步确实是个比较复杂的部分，debug也相对较难，经常有点虚无缥缈的感觉......以后还要继续学习和总结才行~
+最后，并发中的异步I/O确实是个比较复杂的部分，debug也相对较难，因为搞不清后台到底发生了什么，所以经常有点虚无缥缈的感觉......笔者也是初次尝试这个领域，还有许多说得不到位的地方，欢迎大家指正！以后还要继续学习和总结才行~
 
 
 
